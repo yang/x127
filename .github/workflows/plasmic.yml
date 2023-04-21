@@ -1,3 +1,5 @@
+# @format
+
 # Plasmic workflow v4
 name: Sync, build and deploy Plasmic app
 
@@ -7,6 +9,7 @@ permissions:
   pull-requests: write
 
 on:
+  workflow_dispatch:
   repository_dispatch:
     types: [plasmic]
 
@@ -31,52 +34,24 @@ jobs:
         uses: actions/cache@v2
         with:
           key: lock-${{ hashFiles('**/package-lock.json', '**/yarn.lock') }}
-          path: ${{ github.event.client_payload.data.directory }}/node_modules
-      - id: init
-        name: Initializing Plasmic app...
-        uses: plasmicapp/plasmic-action@master
-        with:
-          run: init
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: ${{ github.event.client_payload.data.branch }}
-          directory: ${{ github.event.client_payload.data.directory }}
-          project_id: ${{ github.event.client_payload.data.projectId }}
-          project_api_token: ${{ github.event.client_payload.data.projectApiToken }}
-          platform: ${{ github.event.client_payload.data.platform }}
-          language: ${{ github.event.client_payload.data.language }}
-          scheme: ${{ github.event.client_payload.data.scheme }}
-          title: ${{ github.event.client_payload.data.title }}
-          description: ${{ github.event.client_payload.data.description }}
+          path: ./node_modules
       - id: sync
-        name: Syncing Plasmic project...
-        if: ${{ github.event.client_payload.data.scheme == 'codegen' && steps.init.outputs.synced != 'true' }}
-        uses: plasmicapp/plasmic-action@master
-        with:
-          run: sync
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: ${{ github.event.client_payload.data.branch }}
-          directory: ${{ github.event.client_payload.data.directory }}
-          project_id: ${{ github.event.client_payload.data.projectId }}
-          project_api_token: ${{ github.event.client_payload.data.projectApiToken }}
-          sync_action: ${{ github.event.client_payload.data.syncAction }}
-          title: ${{ github.event.client_payload.data.title }}
-          description: ${{ github.event.client_payload.data.description }}
-      - id: build
-        name: Building Plasmic app...
-        if: ${{ github.event.client_payload.data.publish }}
-        uses: plasmicapp/plasmic-action@master
-        with:
-          run: build
-          branch: ${{ github.event.client_payload.data.branch }}
-          directory: ${{ github.event.client_payload.data.directory }}
-          platform: ${{ github.event.client_payload.data.platform }}
-      - id: gh-pages
-        name: Publishing to GitHub Pages...
-        uses: JamesIves/github-pages-deploy-action@4.1.0
-        if: ${{ steps.build.outputs.publish_dir }}
-        with:
-          branch: gh-pages
-          folder: ${{ steps.build.outputs.publish_dir }}
+        run: |
+          set -o errexit -o nounset
+          new_branch="$( echo $RANDOM | md5sum | head -c 8; echo )"
+          git checkout -B "$new_branch"
+          npm i
+          npx plasmic sync --yes
+          npm run build
+          git add -A .
+          git config user.name "Test"
+          git config user.email "test@plasmic.app"
+          if [[ "$( git status --untracked-files=no --porcelain )" ]] ; then
+            git commit -m 'Message'
+            echo new_branch="$new_branch" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
       - id: pr
         name: Creating pull request...
         uses: repo-sync/pull-request@v2
@@ -84,4 +59,4 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           source_branch: ${{ steps.sync.outputs.new_branch }}
-          destination_branch: ${{ github.event.client_payload.data.branch }}
+          destination_branch: main
